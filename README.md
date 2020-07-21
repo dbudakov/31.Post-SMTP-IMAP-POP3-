@@ -59,7 +59,8 @@ Cообщения появятся в файле
 Использовались материалы  
 http://habrahabr.ru/post/193220/  
 https://github.com/Haran/Mail.CONF  
-
-/var/log/message - лог named
-/var/log/maillog - лог postfix  
-/var/spool/mail/user_name - почта  
+```
+/var/log/message - лог named  
+/var/log/maillog - лог postfix    
+/var/spool/mail/user_name - почта   
+```
