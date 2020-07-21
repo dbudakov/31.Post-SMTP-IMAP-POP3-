@@ -1,0 +1,163 @@
+sed -i 's!$CONF\['"'create_mailbox_subdirs_prefix'"'\]='"'INBOX.'"';!$CONF\['"'create_mailbox_subdirs_prefix'"'\]='"''"';!' /usr/share/nginx/html/postfixadmin/config.inc.php
+
+yum update postfix
+yum install -y \
+dovecot \
+dovecot-mysql
+
+groupadd  -g 1100 vmail
+useradd -d /var/vmail/ -g 1100 -u 1100 vmail
+chown vmail:vmail /var/vmail
+
+mkdir /etc/postfix/certs
+openssl req -new -x509 -days 3650 -nodes -out /etc/postfix/certs/cert.pem -keyout /etc/postfix/certs/key.pem
+
+mkdir /etc/postfix/mysql
+
+cat<<EOF>/etc/postfix/mysql/relay_domains.cf
+hosts = localhost
+user = postfix
+password = P@ssw0rd
+dbname = postfix
+EOF
+
+cat<<EOF>/etc/postfix/mysql/virtual_alias_domain_maps.cf
+hosts = localhost
+user = postfix
+password = P@ssw0rd
+dbname = postfix
+query = SELECT goto FROM alias,alias_domain WHERE alias_domain.alias_domain = '%d' and alias.address = CONCAT('%u', '@', alias_domain.target_domain) AND alias.active = 1
+EOF
+
+cat<<EOF>/etc/postfix/mysql/virtual_alias_maps.cf
+hosts = localhost
+user = postfix
+password = P@ssw0rd
+dbname = postfix
+query = SELECT goto FROM alias WHERE address='%s' AND active = '1'
+EOF
+
+cat<<EOF>/etc/postfix/mysql/virtual_mailbox_domains.cf
+hosts = localhost
+user = postfix
+password = P@ssw0rd
+dbname = postfix
+query = SELECT domain FROM domain WHERE domain='%s' AND backupmx = '0' AND active = '1'
+EOF
+
+cat<<EOF>/etc/postfix/mysql/virtual_mailbox_maps.cf
+hosts = localhost
+user = postfix
+password = P@ssw0rd
+dbname = postfix
+query = SELECT maildir FROM mailbox WHERE username='%s' AND active = '1'
+EOF
+
+
+
+sed -i 's!#relay_domains = $mydestination!relay_domains = mysql:/etc/postfix/mysql/relay_domains.cf!'  /etc/postfix/main.cf
+echo -e "virtual_alias_maps = mysql:/etc/postfix/mysql/virtual_alias_maps.cf,\n                     mysql:/etc/postfix/mysql/virtual_alias_domain_maps.cf" >> /etc/postfix/main.cf
+echo "virtual_mailbox_domains = mysql:/etc/postfix/mysql/virtual_mailbox_domains.cf" >> /etc/postfix/main.cf
+echo "virtual_mailbox_maps = mysql:/etc/postfix/mysql/virtual_mailbox_maps.cf" >> /etc/postfix/main.cf
+
+sed -i 's!#submission inet n       -       n       -       -       smtpd!submission inet n       -       n       -       -       smtpd!' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o milter_macro_daemon_name=ORIGINATING' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o smtpd_relay_restrictions=permit_mynetworks,permit_sasl_authenticated,defer_unauth_destination' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o smtpd_recipient_restrictions=permit_mynetworks,permit_sasl_authenticated,reject' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o smtpd_sasl_auth_enable=yes' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o smtpd_tls_security_level=encrypt' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o smtpd_tls_wrappermode=no' /etc/postfix/master.cf
+sed -i '/submission inet n       -       n       -       -       smtpd/a\ \ -o syslog_name=postfix/submission' /etc/postfix/master.cf
+
+sed -i 's!#soft_bounce = no!soft_bounce = no!' /etc/postfix/main.cf
+sed -i 's!#myhostname = host.domain.tld!myhostname = mail.domain.tld!' /etc/postfix/main.cf
+sed -i 's!#mydomain = domain.tld!mydomain = domain.tld!' /etc/postfix/main.cf
+sed -i 's!#myorigin = \$myhostname!myorigin = \$myhostname!' /etc/postfix/main.cf
+sed -i 's!mydestination = \$myhostname, localhost.\$mydomain, localhost!mydestination = localhost.\$mydomain, localhost!' /etc/postfix/main.cf
+sed -i 's!#mynetworks = 168.100.189.0/28, 127.0.0.0/8!mynetworks = 192.168.100.0/24, 127.0.0.0/8!' /etc/postfix/main.cf
+sed -i 's!#smtpd_banner = $myhostname ESMTP $mail_name!smtpd_banner = $myhostname ESMTP $mail_name!' /etc/postfix/main.cf
+sed -i 's!#debug_peer_list = 127.0.0.1!debug_peer_list = 127.0.0.1!' /etc/postfix/main.cf
+
+cat<<EOF>>/etc/postfix/main.cf
+# ============================================================
+# RESTRICTIONS
+#
+# Uncomment reject_rbl_client if necessary
+# More information at: http://help.ubuntu.ru/wiki/фильтрация_спама_на_уровне_smtp_протокола
+# ============================================================
+smtpd_discard_ehlo_keywords = etrn, silent-discard
+smtpd_forbidden_commands = CONNECT GET POST
+broken_sasl_auth_clients = yes
+smtpd_delay_reject = yes
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+
+smtpd_helo_restrictions = permit_mynetworks,
+                          permit_sasl_authenticated,
+                          reject_non_fqdn_helo_hostname,
+                          reject_invalid_helo_hostname
+
+smtpd_data_restrictions = permit_mynetworks,
+                          permit_sasl_authenticated,
+                          reject_unauth_pipelining,
+                          reject_multi_recipient_bounce,
+
+smtpd_sender_restrictions = permit_mynetworks,
+                            permit_sasl_authenticated,
+                            reject_non_fqdn_sender,
+                            reject_unknown_sender_domain
+
+smtpd_recipient_restrictions = reject_non_fqdn_recipient,
+                               reject_unknown_recipient_domain,
+                               reject_multi_recipient_bounce,
+                               permit_mynetworks,
+                               permit_sasl_authenticated,
+                               reject_unauth_destination,
+                               check_policy_service unix:/var/spool/postfix/postgrey/socket,
+                               #reject_rbl_client zen.spamhaus.org,
+                               #reject_rbl_client bl.spamcop.net,
+                               #reject_rbl_client dnsbl.sorbs.net,
+                               reject_invalid_hostname
+
+# ============================================================
+# TLS
+# ============================================================
+smtp_tls_security_level = may
+smtpd_tls_security_level = may
+smtpd_tls_loglevel = 1
+smtpd_tls_received_header = yes
+smtpd_tls_session_cache_timeout = 3600s
+smtp_tls_session_cache_database = btree:\$data_directory/smtp_tls_session_cache
+smtpd_tls_key_file = /etc/postfix/certs/key.pem
+smtpd_tls_cert_file = /etc/postfix/certs/cert.pem
+tls_random_source = dev:/dev/urandom
+
+# ============================================================
+# LIMITS
+# ============================================================
+message_size_limit = 51200000
+smtpd_soft_error_limit = 10
+smtpd_hard_error_limit = 15
+smtpd_error_sleep_time = 20
+anvil_rate_time_unit = 60s
+smtpd_client_connection_count_limit = 20
+smtpd_client_connection_rate_limit = 30
+smtpd_client_message_rate_limit = 30
+smtpd_client_event_limit_exceptions = 127.0.0.1/8
+smtpd_client_connection_limit_exceptions = 127.0.0.1/8
+
+# ============================================================
+# QUEUE
+# ============================================================
+maximal_queue_lifetime = 1d
+bounce_queue_lifetime = 1d
+EOF
+
+
+cat<<EOF>>/etc/postfix/master.cf
+# ====================================================================
+# DOVECOT
+# ====================================================================
+dovecot unix    -       n       n       -       -      pipe
+  flags=DRhu user=vmail:vmail argv=/usr/libexec/dovecot/deliver -f \${sender} -d \${recipient}
+EOF

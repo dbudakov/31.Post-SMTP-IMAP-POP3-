@@ -1,0 +1,106 @@
+# 4 part
+
+yum install spamassassin amavisd-new -y
+
+
+sed -i 's!required_hits 5!required_hits 6!' /etc/mail/spamassassin/local.cf
+sed -i 's!rewrite_header Subject \[SPAM\]!rewrite_header Subject \*\*\*SPAM\*\*\*!' /etc/mail/spamassassin/local.cf
+cat<<EOF>>/etc/mail/spamassassin/local.cf
+#
+# WEIRD STUFF
+#
+score FORGED_MUA_OUTLOOK 2.199 2.199 0.963 1.116
+score FH_DATE_PAST_20XX 0.0
+score DOS_OE_TO_MX_IMAGE 0.0
+score DOS_OE_TO_MX 0.0
+score DOS_OUTLOOK_TO_MX 0.0
+score TO_NO_BRKTS_DIRECT 0.0
+score HELO_LOCALHOST 0.0
+score FSL_RU_URL 0.0
+score FROM_MISSP_EH_MATCH 1.0
+score TVD_RCVD_SINGLE 1.0
+score TO_IN_SUBJ 1.0
+
+#
+# TUNING
+#
+score SUBJ_FULL_OF_8BITS 0.00
+score HTML_COMMENT_8BITS 0.01
+score HEADER_8BITS 0.00
+score TO_NO_USER 0.01
+score FORGED_MUA_OUTLOOK 0.5
+score X_AUTH_WARNING 0.01
+score SUBJ_HAS_UNIQ_ID 9.99
+score HTTP_USERNAME_USED 9.99
+score FORGED_YAHOO_RCVD 9.99
+score FORGED_JUNO_RCVD 16
+score UNWANTED_LANGUAGE_BODY 1.02
+score MLM 5.55
+score RCVD_NUMERIC_HELO 4.95
+
+#
+# WHITE/BLACK LISTS
+#
+whitelist_from root@localhost
+whitelist_from *@example.com
+blacklist_from *@outblaze.com
+auto_whitelist_path /etc/mail/spamassassin/auto-whitelist
+auto_whitelist_file_mode 0666
+EOF
+
+
+sed -i 's/$max_servers = 2;/$max_servers = 4;/' /etc/amavisd/amavisd.conf
+sed -i 's/$mydomain = '"'example.com'"';/$mydomain = '"'domain.tld'"';/' /etc/amavisd/amavisd.conf
+echo "@client_ipaddr_policy = map { \$_ => 'MYNETS' } @mynetworks;" >>/etc/amavisd/amavisd.conf
+sed -i 's!$sa_tag2_level_deflt = 6.2;!$sa_tag2_level_deflt = 5.2;!' /etc/amavisd/amavisd.conf
+sed -i 's!$sa_kill_level_deflt = 6.9;!$sa_kill_level_deflt = 6.5;!' /etc/amavisd/amavisd.conf
+sed -i 's!$virus_admin               = undef;!$virus_admin               = "virusalert\@$mydomain";!' /etc/amavisd/amavisd.conf
+sed -i 's!$mailfrom_notify_admin     = undef;!$mailfrom_notify_admin     = "virusalert\@$mydomain";!' /etc/amavisd/amavisd.conf
+sed -i 's!$mailfrom_notify_recip     = undef;!$mailfrom_notify_recip     = "virusalert\@$mydomain";!' /etc/amavisd/amavisd.conf
+sed -i 's!$mailfrom_notify_spamadmin = undef;!$mailfrom_notify_spamadmin = undef;!' /etc/amavisd/amavisd.conf
+sed -i 's!# $myhostname = 'host.example.com';!# $myhostname = 'host.example.com';!' /etc/amavisd/amavisd.conf
+sed -i 's!$final_bad_header_destiny = D_BOUNCE;!$final_bad_header_destiny = D_PASS;!' /etc/amavisd/amavisd.conf
+echo '$virus_quarantine_to = "virus-quarantine\@$mydomain";' >> /etc/amavisd/amavisd.conf
+echo '$spam_quarantine_to  = "spamtrap\@$mydomain";' >> /etc/amavisd/amavisd.conf
+
+
+cat<<EOF>>/etc/postfix/master.cf
+# ====================================================================
+# AMAVIS
+# ====================================================================
+amavisfeed unix -       -       n       -       4       lmtp
+  -o lmtp_data_done_timeout=1200
+  -o lmtp_send_xforward_command=yes
+  -o disable_dns_lookups=yes
+  -o max_use=20
+127.0.0.1:10025 inet n    -       n       -       -     smtpd
+  -o content_filter=
+  -o smtpd_delay_reject=no
+  -o smtpd_client_restrictions=permit_mynetworks,reject
+  -o smtpd_helo_restrictions=
+  -o smtpd_sender_restrictions=
+  -o smtpd_recipient_restrictions=permit_mynetworks,reject
+  -o smtpd_data_restrictions=reject_unauth_pipelining
+  -o smtpd_end_of_data_restrictions=
+  -o smtpd_restriction_classes=
+  -o mynetworks=127.0.0.0/8,192.168.0.0/16
+  -o smtpd_error_sleep_time=0
+  -o smtpd_soft_error_limit=1001
+  -o smtpd_hard_error_limit=1000
+  -o smtpd_client_connection_count_limit=0
+  -o smtpd_client_connection_rate_limit=0
+  -o receive_override_options=no_header_body_checks,no_unknown_recipient_checks,no_milters,no_address_mappings
+  -o local_header_rewrite_clients=
+  -o smtpd_milters=
+  -o local_recipient_maps=
+  -o relay_recipient_maps=
+EOF
+
+cat<<EOF>>/etc/postfix/main.cf
+# ============================================================
+# AMAVIS
+# ============================================================
+content_filter=amavisfeed:[127.0.0.1]:10024
+EOF
+
+#systemctl restart postfix

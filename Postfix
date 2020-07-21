@@ -1,0 +1,125 @@
+# Postfix
+
+  Каталоги
+    /etc/postfix/main.cf - основной файл настроек
+    /etc/postfix/master.cf - дополнительный файл настроек для подключения dovecod
+    /var/spool/postfix/ - файлы очеречей
+
+  Утилиты
+    postqueue - смотрим очереди
+      -p - просмотр очереди
+      -f/-i <id>/-s <site> - flush очереди или конкретного письма или писем для домена
+    postsuper - работа с письмами в очередях(удаление, перезапуск)
+    postalias - работа с БД алиасов
+    postconf - работа с конфигурацией Postfix(просмотр, редактирование)
+      -d - показать дефолтные значения
+      -n - показать только измененные в конфиге значения
+       postconf -n > /etc/main.cf-new
+       mv /etc/main.cf /etc/main.cf-orig && mv /etc/main.cf-new /etc/main.cf
+    postlog - запись данных в лог Postfix (например в скриптах)
+    postcat - просмотр содержимого файла в очереди
+      postcat -q 652E93A696
+    postmap - выполнение запросов к вспомогательным таблицам или создание этих таблиц
+
+Примеры конфигов
+  # SASL settings
+  # Use Dovecod to authenticate
+  smtpd_sasl_type = dovecot
+  # Referring to /var/spool/postfix/private/auth
+  smtpd_sasl_path = private/auth
+  smtpd_sasl_auth_enable = yes
+  broken_sasl_auth_clients = yes
+  smtpd_sasl_security_options = noanonymous
+  smtpd_sasl_local_domain =
+  smtpd_sasl_exceptions_networks = $mynetworks
+  smtpd_sasl_authenticated_header = yes
+
+
+## MAIN.CF
+# main.cf - основной конфигурационный файл
+# минимальная конфигурация
+    myhostname = mail.test.ru
+    myorigin = test.ru
+    # mysedtination - определяет домены, которые будут считаться локальными для данного сервера соответственно postfix будет искать пользователей этих доменов в локальных таблицах
+    mydestination = $myhostname, mail.test.ru, localhost.localdomain,
+    localhost
+    inet_interfaces = localhost
+    inet_protocols = ipv4
+# использование БД
+    alias_maps = hash:/etc/aliases
+    alias_database = hash:/etc/aliases
+# Виртуальные почтовые ящики:
+    virtual_mailbox_domains = mysql:/etc/postfix/sql/vdomains.cf
+    virtual_mailbox_base = /var/vmail
+    virtual_mailbox_maps = mysql:/etc/postfix/sql/vmailbox.cf
+    virtual_minimum_uid = 1150
+    virtual_uid_maps = static:1150
+    virtual_gid_maps = static:8
+    virtual_transport = dovecot
+    dovecot_destination_recipient_limit = 1
+# Почтовый релей:
+    mynetworks = 127.0.0.0/8 [::1]/128
+    smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated,
+    defer_unauth_destination
+# DKIM milter:
+    milter_default_action = accept
+    milter_protocol = 2
+    smtpd_milters = inet:localhost:8891
+    non_smtpd_milters = inet:localhost:8891
+# Open relay + DNSBL + RBL + Postgrey
+    permit_mynetworks =
+    relay_domains =
+    virtual_mailbox_domains =
+    mydestination =
+    smtpd_client_restrictions =
+    permit_inet_interfaces,
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_rbl_client dnsbl.sorbs.net, reject_maps_rbl,
+    reject_unknown_client_hostname,
+    reject_unknown_reverse_client_hostname,
+    check_policy_service inet:localhost:10023 # postgrey
+    permit | defer | reject
+# Postfix + SSL (smtp):
+    smtp_tls_security_level = may
+    smtp_tls_ciphers = export
+    smtp_tls_protocols = !SSLv2, !SSLv3
+    smtp_use_tls = yes
+    smtp_tls_mandatory_ciphers = high
+    smtp_tls_mandatory_protocols=!SSLv2,!SSLv3
+    smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
+# Postfix + SSL (smtpd)
+    postconf -e smtpd_tls_cert_file='/etc/letsencrypt/live/mail.mydomain.com/cert.pem'
+    postconf -e smtpd_tls_key_file='/etc/letsencrypt/live/mail.mydomain.com/privkey.pem'
+    postconf -e smtpd_tls_CAfile='/etc/letsencrypt/live/mail.mydomain.com/chain.pem'
+    postconf -e smtp_tls_security_level = may
+    postconf -e smtpd_tls_security_level = may
+
+## MASTER.CF
+# master.cf - конфигурация модулей почтовой системы
+# Конвейер для использования Dovecot:
+    dovecot unix - n n - - pipe
+     flags=DRhu user=vmail:vmail argv=/usr/lib/dovecot/deliver -f ${sender}
+    -d $(recipient)
+
+Postfixadmin - веб интерфейс для работы с пользователями в базе
+  http://postfixadmin.sourceforge.net/
+
+OpenDKIM - DKIM milter
+  http://www.opendkim.org/
+
+Другие типы Postfix milter:
+  http://www.postfix.org/MILTER_README.htm
+  - clamav
+  - rspamd
+  - opendmarc
+
+Очереди
+  Уменьшение времени жизни письма в очереди
+    bounce_queue_lifetime = 5d → 30m
+
+  Удаление письма, которое невозможно доставить
+    bounce_service_name = discard
+  или
+    /etc/postfix/master.cf
+      bounce unix - - n - 0 discard

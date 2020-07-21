@@ -1,0 +1,26 @@
+# send_mail_telnet
+
+# предварительно запускается postfix на прослушку 25 порта
+  /usr/libexec/postfix/master -w
+  netstat -ntpl |grep :25
+
+# подключение
+  telnet 127.0.0.1 25
+
+# набираем
+EHLO mail.test.ru
+mail from: <pavel@test.ru>
+rcpt to: <pavel@test.ru.com>
+
+# формируем сообщение
+DATA - появится сообщение <CR><LF>, CR - carriage return(возврат каретки), LF - line feed(перевод строки)
+From: Paver Vikiryuk <pavel@test.ru>
+To: Pavel <pavel@test.ru.com>
+Subject: Test subject
+Content-Type: text/plain
+
+Hi!
+
+Bye!
+
+.

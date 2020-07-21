@@ -1,0 +1,43 @@
+###
+### /var/log/maillog - лог postfix
+### /var/spool/mail/user_name - почта
+
+
+# vi /usr/share/nginx/html/postfixadmin/config.inc.php
+
+    yum install -y bind bind-utils
+    /bin/cp -f /vagrant/stand/named.conf /etc/named.conf
+    chown root:named /etc/named.conf
+    mkdir /var/named/zones
+    touch /var/named/zones/named.domain.tld.{view,rev}
+    /bin/cp -f /vagrant/stand/named.domain.tld.view /var/named/zones/named.domain.tld.view
+    /bin/cp -f /vagrant/stand/named.domain.tld.rev /var/named/zones/named.domain.tld.rev
+    /bin/cp -f /vagrant/stand/resolv.conf /etc/resolv.conf
+    chattr +i /etc/resolv.conf
+    systemctl start named
+
+    yum update postfix
+    yum install -y dovecot dovecot-mysql
+
+    groupadd  -g 1100 vmail
+    useradd -d /var/vmail/ -g 1100 -u 1100 vmail
+    chown vmail:vmail /var/vmail
+
+    mkdir /etc/postfix/certs
+    openssl req -new -x509 -days 3650 -nodes -out /etc/postfix/certs/cert.pem -keyout /etc/postfix/certs/key.pem -subj "/C=RU/ST=MO/L=Moskow/O=Otus/OU=IT/CN=domain.com"
+
+    mkdir /etc/postfix/mysql
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/mysql/relay_domains.cf /etc/postfix/mysql/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/mysql/virtual_alias_domain_maps.cf /etc/postfix/mysql/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/mysql/virtual_alias_maps.cf /etc/postfix/mysql/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/mysql/virtual_mailbox_domains.cf /etc/postfix/mysql/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/mysql/virtual_mailbox_maps.cf /etc/postfix/mysql/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/main.cf /etc/postfix/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/master.cf /etc/postfix/
+    /bin/cp -f /vagrant/Mail.CONF/etc/dovecot/dovecot.conf  /etc/dovecot/dovecot.conf
+    /bin/cp -f /vagrant/Mail.CONF/etc/dovecot/conf.d/*  /etc/dovecot/conf.d/ -f
+    /bin/cp -f /vagrant/Mail.CONF/etc/dovecot/dovecot-sql.conf.ext  /etc/dovecot/
+    /bin/cp -f /vagrant/Mail.CONF/etc/postfix/exceptions.cf /etc/postfix/
+    systemctl restart postfix
+    systemctl start dovecot.socket
+    systemctl start dovecot

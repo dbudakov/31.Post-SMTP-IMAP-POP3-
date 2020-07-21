@@ -1,0 +1,15 @@
+$TTL 3600
+$ORIGIN 100.168.192.in-addr.arpa.
+100.168.192.in-addr.arpa.  IN      SOA    mail.domain.tld. root.dns.lab. (
+                            2711201407 ; serial
+                            3600       ; refresh (1 hour)
+                            600        ; retry (10 minutes)
+                            86400      ; expire (1 day)
+                            600        ; minimum (10 minutes)
+                        )
+
+@                IN      NS      mail.domain.tld.
+@                IN      MX      10 mail.domain.tld.
+
+; DNS Servers
+101              IN      PTR     mail.domain.tld.

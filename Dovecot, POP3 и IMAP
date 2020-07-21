@@ -1,0 +1,190 @@
+# Dovecot, POP3 и IMAP
+
+POP3(Post Office Protocol vers 3) - протокол почтового отделения
+  - порт 110/TCP(без SSL)
+  - порт 995/TCP(over SSL)
+  - загружает сообщения с сервера на локальный клиент
+  - удаляет сообщения с сервера
+  - работает только в одном направлении(сервер -> клиент)
+  - описан в https://toosl.ietf.org/html/rfc1939
+  - аутентификация SASL(англ Simple Authentication and Security Layer - простой уровень аутентификации и безопасности)
+
+IMAP(англ. Internet Message Access Protocol)
+  - порт 143/TCP(без SSL)
+  - порт 993/TCP(over SSL)
+  - работает с сообщениями на сервере
+  - не требует пересылки полного содержания сообщений
+  - отслеживает состояние сообщений
+  - дает возможность работать нескольким клиентам с одним почтовым ящиком
+  - описан в https://tools.ietf.org/html/rfc3501
+
+Dovecot
+Dovecot - свободный IMAP и POP3 сервер
+  - поддержка форматов почтовых ящиков mbox и Maildir, а также собственные форматы dbox и Cydir.
+  - поддержка общих ящиков и папок (shared mailboxes and folders)
+  - поддерживает квоты
+  - высокое быстродействие благодаря индексации содержимого ящиков
+  - поддерживает LDAP и SSL
+  - расширяемый (поддерживает плагины)
+  - возможность модификации индексов с разных серверов(балансировка, репликация)
+  - безопасный
+
+  Файлы
+    /etc/dovecot/dovecot.conf - основной файл настроек
+    /etc/dovecot/conf.d - модули настроек
+
+  Утилиты
+    doveconf - отображение настроек
+      -n - вывод только измененных настроек
+
+1.Postfix - MTA + LDA, Dovecot - MDA
+  http://www.postfix.org/VIRTUAL_README.html
+
+   плюсы
+     - наиболее простая конфигурация
+     - подходит для небольших инсталляций
+   минусы
+     - необходимость Dovecot сканировать maildir пользователя
+
+  # Файлы настроек
+
+    /etc/postfix/main.cf
+    virtual_alias_domains = example.com ...other hosted domains…
+    virtual_alias_maps = hash:/etc/postfix/virtual
+    virtual_mailbox_base = /var/mail/mydomain
+    virtual_mailbox_maps = hash:/etc/postfix/vmailbox
+    virtual_minimum_uid = 100
+    virtual_uid_maps = static:5000
+    virtual_gid_maps = static:5000
+
+    /etc/postfix/vmailbox
+    info@example.com info/Maildir
+    sales@example.com sales/Maildir
+    # Comment out the entry below to implement a catch-all.
+    # @example.com catchall/Maildir
+     ...virtual mailboxes for more domains…
+
+    /etc/postfix/virtual
+    postmaster@example.compostmaster - заданый алиас
+
+    /etc/dovecot/dovecot.conf
+    mail_location = mailbox:/var/mail/mydomain/%u - адрес к ящикам виртуальных пользователей
+
+2. Postfix - MTA, Dovecot - LDA + MDA (passwd-file)
+   https://wiki.dovecot.org/LDA/Postfix
+   https://wiki.dovecot.org/LDA/Postfix#Virtual_users
+    плюсы
+      - подходит для любых инсталяций
+    минусы
+      - более сложная настройка
+
+  # Файлы настроек
+
+    # подключение модуля dovecot для postfix
+    /etc/postfix/master.cf
+    dovecot unix - n n - - pipe
+     flags=DRhu user=vmail:vmail argv=/usr/lib/dovecot/deliver -f ${sender} -d $(recipient)
+
+    /etc/postfix/main.cf
+    dovecot_destination_recipient_limit = 1
+    virtual_mailbox_domains = your.domain.here
+    virtual_transport = dovecot
+
+    /etc/dovecot/dovecot.conf
+    mail_home = /var/vmail
+    mail_location = mailbox:/var/vmail/mydomain/%u
+    passdb {
+    driver = passwd-file - база данных
+    args = scheme=sha256 username_format=%n /etc/dovecot/users
+    }
+    userdb {
+    driver = passwd-file
+    args = username_format=%n /etc/dovecot/users
+    default_fields = id=vmail id=vmail home=/var/vmail/%u
+    }
+
+    # примеры файлов аккаунтов
+    /etc/dovecot/users
+    user1:{SHA256}pmWkWSBCL51Bfkhn79xPuKBKHz//H6B+mY6G9/eieuM=::::::
+
+    # шифрование пароля
+    # doveadm pw -s SHA256
+    Enter new password:
+    Retype new password:
+    {SHA256}47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
+
+3. Postfix - MTA, Dovecot - LDA + MDA (mysql)
+
+    /etc/dovecot/conf.d/auth-sql.conf.ext
+    passdb {
+     driver = sql
+     # Path for SQL configuration file, see example-config/dovecot-sql.conf.ext
+     args = /etc/dovecot/dovecot-sql.conf.ext
+    }
+    userdb {
+     driver = sql
+     args = /etc/dovecot/dovecot-sql.conf.ext
+    }
+     #driver = static
+     #args = uid=vmail gid=vmail home=/var/vmail/%u
+
+    /etc/dovecot/dovecot-sql.conf.ext
+    driver = mysql
+    connect = host=127.0.0.1 dbname=postfix user=postfixuser password=postfix
+    default_pass_scheme = MD5-CRYPT
+    password_query = SELECT username as user, password FROM mailbox WHERE username = '%u'
+    user_query = SELECT '/vmail/%d/%n' AS home, 1150 AS uid, 5000 AS gid, CONCAT('*:bytes=', CAST(quota AS
+    CHAR)) AS quota_rule FROM mailbox WHERE username = '%u' AND active = '1'
+
+4. Postfix: авторизация через Dovecot
+   http://www.postfix.org/SASL_README.html
+
+    /etc/dovecot/dovecot.conf
+    service auth {
+    ...
+    unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    # Assuming the default Postfix user and group
+    user = postfix
+    group = postfix
+    }
+    ...
+    }
+    auth_mechanisms = plain login
+
+    /etc/postfix/main.cf
+    smtpd_sasl_type = dovecot
+    smtpd_sasl_path = private/auth
+    smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated(включает аутентификацию), ...
+
+5. Dovecot + SSL:
+
+    /etc/dovecot/conf.d/10-ssl.conf
+    ssl = yes
+    ssl_cert = </etc/letsencrypt/live/mydomain.ru/cert.pem
+    ssl_key = </etc/letsencrypt/live/mydomain.ru/privkey.pem
+    ssl_ca = </etc/letsencrypt/live/mydomain.ru/chain.pem
+
+*. Индексные файлы
+   https://wiki.dovecot.org/MailLocation
+
+    /etc/dovecot/dovecot.conf
+    mail_location = maildir:~/Maildir:INDEX=/var/indexes
+
+Релей
+  http://www.postfix.org/transport.5.html
+  http://www.postfix.org/postconf.5.html#relay_transport
+
+  /etc/postfix/main.cf
+    relay_domains = domain1.com, domain2.com
+    transport_maps = hash:/etc/postfix/transport
+    relay_recipient_maps = hash:/etc/postfix/relay_recipients
+    relay_transport = relay
+
+  /etc/postfix/transport
+    domain1.com smtp:[mail.example.com]
+    domain2.com smtp:[mail.example.com]
+
+  /etc/postfix/relay_recipients
+    @domain1.com x
+    @domain2.com x
